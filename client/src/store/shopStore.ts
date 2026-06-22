@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AuthUserDto, ProductQuery, ProductSummaryDto } from './api';
+import type { ProductQuery, ProductSummaryDto } from '../services/api';
 
 export type ViewKey = 'home' | 'product' | 'cart' | 'profile' | 'orders' | 'articles' | 'about' | 'contact' | 'faq' | 'admin';
 
@@ -10,15 +10,12 @@ export type CartItem = ProductSummaryDto & {
 
 type ShopState = {
   cart: CartItem[];
-  currentUser: AuthUserDto | null;
   activeView: ViewKey;
   selectedSlug: string | null;
   filters: ProductQuery;
   setActiveView: (activeView: ViewKey) => void;
   openProduct: (selectedSlug: string) => void;
   setFilters: (filters: Partial<ProductQuery>) => void;
-  login: (user: AuthUserDto) => void;
-  logout: () => void;
   addToCart: (product: ProductSummaryDto) => void;
   updateQuantity: (id: string, quantity: number) => void;
   removeFromCart: (id: string) => void;
@@ -30,15 +27,12 @@ export const useShopStore = create<ShopState>()(
   persist(
     (set, get) => ({
       cart: [],
-      currentUser: null,
       activeView: 'home',
       selectedSlug: null,
       filters: { search: '', categoryId: '', sort: 'newest' },
       setActiveView: (activeView) => set({ activeView }),
       openProduct: (selectedSlug) => set({ selectedSlug, activeView: 'product' }),
       setFilters: (filters) => set((state) => ({ filters: { ...state.filters, ...filters } })),
-      login: (currentUser) => set({ currentUser }),
-      logout: () => set({ currentUser: null, activeView: 'home' }),
       addToCart: (product) =>
         set((state) => {
           const existing = state.cart.find((item) => item.id === product.id);

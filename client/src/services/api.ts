@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5010/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5011/api';
 
 export type CategoryDto = {
   id: string;
@@ -6,16 +6,6 @@ export type CategoryDto = {
   name: string;
   slug: string;
   description?: string | null;
-};
-
-export type AuthUserDto = {
-  id: string;
-  username: string;
-  fullName: string;
-  email: string;
-  phoneNumber: string;
-  role: 'Admin' | 'Customer' | string;
-  isAdmin: boolean;
 };
 
 export type ProductSummaryDto = {
@@ -40,11 +30,6 @@ export type ProductSpecificationDto = {
   key: string;
   value: string;
   sortOrder: number;
-};
-
-export type UploadedProductImageDto = {
-  url: string;
-  fileName: string;
 };
 
 export type ProductDetailDto = ProductSummaryDto & {
@@ -84,11 +69,9 @@ export type AddressDto = {
 
 export type UserProfileDto = {
   id: string;
-  username: string;
   fullName: string;
   email: string;
   phoneNumber: string;
-  role: string;
   isAdmin: boolean;
   addresses: AddressDto[];
 };
@@ -162,11 +145,43 @@ export type UpsertProductPayload = {
   specifications: Array<{ key: string; value: string; sortOrder: number }>;
 };
 
-async function request<T>(path: string, options: RequestInit & { userId?: string } = {}): Promise<T> {
-  const { userId, ...fetchOptions } = options;
+function normalizeNumber(value: unknown, fallback = 0): number {
+  if (value === null || value === undefined || value === '') return fallback;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function normalizeProductPayload(payload: UpsertProductPayload): UpsertProductPayload {
+  return {
+    ...payload,
+    price: normalizeNumber(payload.price, 0),
+    compareAtPrice: normalizeNullableNumber(payload.compareAtPrice),
+    stockQuantity: normalizeNumber(payload.stockQuantity, 0),
+    isFeatured: Boolean(payload.isFeatured),
+    imageUrls: (payload.imageUrls ?? []).map((x) => String(x).trim()).filter(Boolean),
+    specifications: (payload.specifications ?? [])
+      .map((spec, index) => ({
+        key: String(spec.key ?? '').trim(),
+        value: String(spec.value ?? '').trim(),
+        sortOrder: normalizeNumber(spec.sortOrder, index + 1),
+      }))
+      .filter((spec) => spec.key && spec.value),
+  };
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(userId ? { 'X-User-Id': userId } : {}), ...(fetchOptions.headers ?? {}) },
-    ...fetchOptions,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers ?? {}),
+    },
+    ...options,
   });
 
   if (!response.ok) {
@@ -187,34 +202,25 @@ function toQueryString(params: ProductQuery): string {
 }
 
 export const api = {
-  login: (username: string, password: string) => request<AuthUserDto>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
-  me: (userId: string) => request<AuthUserDto>('/auth/me', { userId }),
   getCategories: () => request<CategoryDto[]>('/categories'),
   getProducts: (params: ProductQuery = {}) => request<ProductsResponse>(`/products?${toQueryString(params)}`),
   getBestSellers: () => request<ProductSummaryDto[]>('/products/best-sellers'),
   getProduct: (slug: string) => request<ProductDetailDto>(`/products/${slug}`),
-  uploadProductImages: async (files: File[], userId: string) => {
-    const formData = new FormData();
-    files.forEach((file) => formData.append('files', file));
-    const response = await fetch(`${API_BASE_URL}/admin/product-images`, {
+  createProduct: (payload: UpsertProductPayload) =>
+    request<{ id: string; slug: string }>('/admin/products', {
       method: 'POST',
-      headers: { 'X-User-Id': userId },
-      body: formData,
-    });
-    if (!response.ok) {
-      const message = await response.text();
-      throw new Error(message || 'خطا در آپلود تصاویر');
-    }
-    return response.json() as Promise<UploadedProductImageDto[]>;
-  },
-  createProduct: (payload: UpsertProductPayload, userId: string) => request<{ id: string; slug: string }>('/admin/products', { method: 'POST', body: JSON.stringify(payload), userId }),
-  updateProfile: (userId: string, payload: Pick<UserProfileDto, 'fullName' | 'email' | 'phoneNumber'>) => request<void>(`/customers/${userId}/profile`, { method: 'PUT', body: JSON.stringify(payload) }),
+      body: JSON.stringify(normalizeProductPayload(payload)),
+    }),
+  updateProfile: (userId: string, payload: Pick<UserProfileDto, 'fullName' | 'phoneNumber'>) =>
+    request<UserProfileDto>(`/customers/${userId}/profile`, { method: 'PUT', body: JSON.stringify(payload) }),
   getProfile: (userId: string) => request<UserProfileDto>(`/customers/${userId}/profile`),
-  addAddress: (userId: string, payload: Omit<AddressDto, 'id'>) => request<AddressDto>(`/customers/${userId}/addresses`, { method: 'POST', body: JSON.stringify(payload) }),
+  addAddress: (userId: string, payload: Omit<AddressDto, 'id'>) =>
+    request<AddressDto>(`/customers/${userId}/addresses`, { method: 'POST', body: JSON.stringify(payload) }),
   getOrders: (userId: string) => request<OrderDto[]>(`/customers/${userId}/orders`),
-  createOrder: (payload: CreateOrderPayload) => request<OrderDto>('/orders', { method: 'POST', body: JSON.stringify(payload) }),
-  getAdminOrders: (userId: string) => request<OrderDto[]>('/admin/orders', { userId }),
-  getDashboard: (userId: string) => request<DashboardDto>('/admin/dashboard', { userId }),
+  createOrder: (payload: CreateOrderPayload) =>
+    request<OrderDto>('/orders', { method: 'POST', body: JSON.stringify(payload) }),
+  getAdminOrders: () => request<OrderDto[]>('/admin/orders'),
+  getDashboard: () => request<DashboardDto>('/admin/dashboard'),
   getArticles: () => request<ArticleDto[]>('/articles'),
   getAbout: () => request<{ title: string; body: string; supportPhone: string; email: string }>('/about'),
 };

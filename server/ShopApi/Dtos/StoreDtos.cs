@@ -4,6 +4,10 @@ namespace ShopApi.Dtos;
 
 public record CategoryDto(Guid Id, Guid? ParentId, string Name, string Slug, string? Description);
 
+public record LoginRequest(string Username, string Password);
+
+public record AuthUserDto(Guid Id, string Username, string FullName, string Email, string PhoneNumber, string Role, bool IsAdmin);
+
 public record ProductSummaryDto(
     Guid Id,
     Guid CategoryId,
@@ -21,6 +25,8 @@ public record ProductSummaryDto(
     string? PrimaryImageUrl);
 
 public record ProductSpecificationDto(Guid Id, string Key, string Value, int SortOrder);
+
+public record UploadedProductImageDto(string Url, string FileName);
 
 public record ProductDetailDto(
     Guid Id,
@@ -78,7 +84,7 @@ public record UpsertAddressRequest(
     string ReceiverPhone,
     bool IsDefault);
 
-public record UserProfileDto(Guid Id, string FullName, string Email, string PhoneNumber, bool IsAdmin, IReadOnlyList<AddressDto> Addresses);
+public record UserProfileDto(Guid Id, string Username, string FullName, string Email, string PhoneNumber, string Role, bool IsAdmin, IReadOnlyList<AddressDto> Addresses);
 
 public record UpdateProfileRequest(string FullName, string Email, string PhoneNumber);
 

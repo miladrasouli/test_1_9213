@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ShopApi.Models;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ShopApi.Data;
 
@@ -21,6 +23,7 @@ public class ShopDbContext(DbContextOptions<ShopDbContext> options) : DbContext(
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Email).IsUnique();
+        modelBuilder.Entity<AppUser>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<Category>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<Product>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<Article>().HasIndex(x => x.Slug).IsUnique();
@@ -41,6 +44,8 @@ public class ShopDbContext(DbContextOptions<ShopDbContext> options) : DbContext(
         modelBuilder.Entity<Invoice>().Property(x => x.PayableAmount).HasPrecision(18, 2);
         modelBuilder.Entity<ProductSpecification>().Property(x => x.Key).HasMaxLength(120);
         modelBuilder.Entity<ProductSpecification>().Property(x => x.Value).HasMaxLength(500);
+        modelBuilder.Entity<AppUser>().Property(x => x.Username).HasMaxLength(80);
+        modelBuilder.Entity<AppUser>().Property(x => x.PasswordHash).HasMaxLength(128);
 
         Seed(modelBuilder);
     }
@@ -88,8 +93,8 @@ public class ShopDbContext(DbContextOptions<ShopDbContext> options) : DbContext(
         var adminId = Guid.Parse("cccccccc-cccc-cccc-cccc-ccccccccccc1");
         var customerId = Guid.Parse("cccccccc-cccc-cccc-cccc-ccccccccccc2");
         modelBuilder.Entity<AppUser>().HasData(
-            new AppUser { Id = adminId, FullName = "مدیر فروشگاه", Email = "admin@shopsuite.local", PhoneNumber = "09120000000", IsAdmin = true },
-            new AppUser { Id = customerId, FullName = "مشتری نمونه", Email = "customer@shopsuite.local", PhoneNumber = "09121111111", IsAdmin = false });
+            new AppUser { Id = adminId, Username = "admin", PasswordHash = HashPassword("Admin@123"), FullName = "مدیر فروشگاه", Email = "admin@shopsuite.local", PhoneNumber = "09120000000", IsAdmin = true },
+            new AppUser { Id = customerId, Username = "customer", PasswordHash = HashPassword("Customer@123"), FullName = "مشتری نمونه", Email = "customer@shopsuite.local", PhoneNumber = "09121111111", IsAdmin = false });
 
         modelBuilder.Entity<Address>().HasData(new Address
         {
@@ -108,5 +113,11 @@ public class ShopDbContext(DbContextOptions<ShopDbContext> options) : DbContext(
         modelBuilder.Entity<Article>().HasData(
             new Article { Id = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee1"), Title = "راهنمای خرید موبایل در سال ۱۴۰۵", Slug = "mobile-buying-guide-1405", Summary = "چطور بین دوربین، باتری و نمایشگر انتخاب بهتری داشته باشیم.", Body = "در خرید گوشی بهتر است نیاز واقعی، بودجه، کیفیت نمایشگر، پشتیبانی نرم‌افزاری و گارانتی را کنار هم بررسی کنید.", CoverImageUrl = "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=900" },
             new Article { Id = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee2"), Title = "چیدمان آشپزخانه کوچک", Slug = "small-kitchen-layout", Summary = "چند ایده کاربردی برای استفاده بهتر از فضا.", Body = "وسایل چندکاره، نور مناسب و نظم در دسته‌بندی لوازم باعث می‌شود آشپزخانه کوچک هم کارآمد و زیبا باشد.", CoverImageUrl = "https://images.unsplash.com/photo-1556911220-bff31c812dba?w=900" });
+    }
+
+    public static string HashPassword(string password)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+        return Convert.ToHexString(bytes);
     }
 }

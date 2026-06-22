@@ -11,6 +11,20 @@ public static class StoreEndpoints
     {
         var api = app.MapGroup("/api");
 
+        api.MapPost("/auth/login", async (ShopDbContext db, LoginRequest request) =>
+        {
+            var username = request.Username.Trim().ToLower();
+            var passwordHash = ShopDbContext.HashPassword(request.Password);
+            var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Username.ToLower() == username && x.PasswordHash == passwordHash);
+            return user is null ? Results.Unauthorized() : Results.Ok(ToAuthUser(user));
+        });
+
+        api.MapGet("/auth/me", async (ShopDbContext db, HttpRequest http) =>
+        {
+            var user = await GetRequestUser(db, http);
+            return user is null ? Results.Unauthorized() : Results.Ok(ToAuthUser(user));
+        });
+
         api.MapGet("/categories", async (ShopDbContext db) =>
             await db.Categories
                 .AsNoTracking()
@@ -129,8 +143,33 @@ public static class StoreEndpoints
                 similar));
         });
 
-        api.MapPost("/admin/products", async (ShopDbContext db, UpsertProductRequest request) =>
+        app.MapGet("/uploads/products/{fileName}", (IWebHostEnvironment env, string fileName) =>
         {
+            var safeName = Path.GetFileName(fileName);
+            var uploadRoot = Path.Combine(env.WebRootPath ?? Path.Combine(env.ContentRootPath, "wwwroot"), "uploads", "products");
+            var filePath = Path.Combine(uploadRoot, safeName);
+            if (!File.Exists(filePath))
+            {
+                return Results.NotFound();
+            }
+
+            var contentType = Path.GetExtension(filePath).ToLowerInvariant() switch
+            {
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                ".gif" => "image/gif",
+                _ => "image/jpeg"
+            };
+            return Results.File(filePath, contentType);
+        });
+
+        api.MapPost("/admin/products", async (ShopDbContext db, HttpRequest http, UpsertProductRequest request) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var product = new Product
             {
                 CategoryId = request.CategoryId,
@@ -148,24 +187,67 @@ public static class StoreEndpoints
             };
 
             db.Products.Add(product);
-
-            var slugExists = await db.Products.AnyAsync(p => p.Slug == request.Slug);
-
-            if (slugExists)
-            {
-                return Results.BadRequest(new
-                {
-                    message = "اسلاگ محصول تکراری است"
-                });
-            }
-
-
             await db.SaveChangesAsync();
             return Results.Created($"/api/products/{product.Slug}", new { product.Id, product.Slug });
         });
 
-        api.MapPut("/admin/products/{id:guid}", async (ShopDbContext db, Guid id, UpsertProductRequest request) =>
+        api.MapPost("/admin/product-images", async (ShopDbContext db, HttpRequest http, IWebHostEnvironment env) =>
         {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            if (!http.HasFormContentType)
+            {
+                return Results.BadRequest("فایل تصویر ارسال نشده است.");
+            }
+
+            var form = await http.ReadFormAsync();
+            var files = form.Files;
+            if (files.Count == 0)
+            {
+                return Results.BadRequest("حداقل یک تصویر انتخاب کنید.");
+            }
+
+            var uploadRoot = Path.Combine(env.WebRootPath ?? Path.Combine(env.ContentRootPath, "wwwroot"), "uploads", "products");
+            Directory.CreateDirectory(uploadRoot);
+
+            var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+            var uploaded = new List<UploadedProductImageDto>();
+
+            foreach (var file in files)
+            {
+                var extension = Path.GetExtension(file.FileName);
+                if (!allowedExtensions.Contains(extension))
+                {
+                    return Results.BadRequest($"فرمت فایل {file.FileName} مجاز نیست.");
+                }
+
+                if (file.Length > 5 * 1024 * 1024)
+                {
+                    return Results.BadRequest($"حجم فایل {file.FileName} بیشتر از ۵ مگابایت است.");
+                }
+
+                var safeName = $"{Guid.NewGuid():N}{extension.ToLowerInvariant()}";
+                var filePath = Path.Combine(uploadRoot, safeName);
+                await using var stream = File.Create(filePath);
+                await file.CopyToAsync(stream);
+
+                var url = $"{http.Scheme}://{http.Host}/uploads/products/{safeName}";
+                uploaded.Add(new UploadedProductImageDto(url, file.FileName));
+            }
+
+            return Results.Ok(uploaded);
+        });
+
+        api.MapPut("/admin/products/{id:guid}", async (ShopDbContext db, HttpRequest http, Guid id, UpsertProductRequest request) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var product = await db.Products
                 .Include(x => x.Images)
                 .Include(x => x.Specifications)
@@ -323,8 +405,14 @@ public static class StoreEndpoints
             return Results.Created($"/api/orders/{order.Id}", ToOrder(saved));
         });
 
-        api.MapGet("/admin/orders", async (ShopDbContext db) =>
-            await db.Orders
+        api.MapGet("/admin/orders", async (ShopDbContext db, HttpRequest http) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            return Results.Ok(await db.Orders
                 .AsNoTracking()
                 .Include(x => x.User)
                 .Include(x => x.Items)
@@ -332,19 +420,25 @@ public static class StoreEndpoints
                 .OrderByDescending(x => x.CreatedAt)
                 .Select(x => ToOrder(x))
                 .ToListAsync());
+        });
 
-        api.MapGet("/admin/dashboard", async (ShopDbContext db) =>
+        api.MapGet("/admin/dashboard", async (ShopDbContext db, HttpRequest http) =>
         {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var bestSellers = await db.Products.AsNoTracking().Include(x => x.Category).Include(x => x.Images).OrderByDescending(x => x.SoldCount).Take(5).Select(x => ToSummary(x)).ToListAsync();
             var recentOrders = await db.Orders.AsNoTracking().Include(x => x.User).Include(x => x.Items).Include(x => x.Invoice).OrderByDescending(x => x.CreatedAt).Take(6).Select(x => ToOrder(x)).ToListAsync();
             var totalSales = await db.Orders.Where(x => x.PaymentStatus == PaymentStatus.Paid).SumAsync(x => x.GrandTotal);
-            return new DashboardDto(
+            return Results.Ok(new DashboardDto(
                 await db.Products.CountAsync(),
                 await db.Categories.CountAsync(),
                 await db.Orders.CountAsync(),
                 totalSales,
                 bestSellers,
-                recentOrders);
+                recentOrders));
         });
 
         api.MapGet("/articles", async (ShopDbContext db) =>
@@ -361,8 +455,13 @@ public static class StoreEndpoints
             return article is null ? Results.NotFound() : Results.Ok(new ArticleDto(article.Id, article.Title, article.Slug, article.Summary, article.Body, article.CoverImageUrl, article.PublishedAt));
         });
 
-        api.MapPost("/admin/articles", async (ShopDbContext db, UpsertArticleRequest request) =>
+        api.MapPost("/admin/articles", async (ShopDbContext db, HttpRequest http, UpsertArticleRequest request) =>
         {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var article = new Article
             {
                 Title = request.Title,
@@ -405,6 +504,27 @@ public static class StoreEndpoints
             product.IsFeatured,
             product.Images.OrderByDescending(x => x.IsPrimary).Select(x => x.Url).FirstOrDefault());
 
+    private static async Task<AppUser?> GetRequestUser(ShopDbContext db, HttpRequest http)
+    {
+        if (!http.Headers.TryGetValue("X-User-Id", out var userIdHeader) || !Guid.TryParse(userIdHeader, out var userId))
+        {
+            return null;
+        }
+
+        return await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == userId);
+    }
+
+    private static async Task<bool> IsAdmin(ShopDbContext db, HttpRequest http)
+    {
+        var user = await GetRequestUser(db, http);
+        return user?.IsAdmin == true;
+    }
+
+    private static string ToRole(AppUser user) => user.IsAdmin ? "Admin" : "Customer";
+
+    private static AuthUserDto ToAuthUser(AppUser user) =>
+        new(user.Id, user.Username, user.FullName, user.Email, user.PhoneNumber, ToRole(user), user.IsAdmin);
+
     private static List<ProductSpecification> ToSpecifications(IReadOnlyList<UpsertProductSpecificationRequest>? specifications) =>
         (specifications ?? Array.Empty<UpsertProductSpecificationRequest>())
             .Where(x => !string.IsNullOrWhiteSpace(x.Key) && !string.IsNullOrWhiteSpace(x.Value))
@@ -420,7 +540,7 @@ public static class StoreEndpoints
         new(address.Id, address.Title, address.Province, address.City, address.Street, address.PostalCode, address.ReceiverName, address.ReceiverPhone, address.IsDefault);
 
     private static UserProfileDto ToProfile(AppUser user) =>
-        new(user.Id, user.FullName, user.Email, user.PhoneNumber, user.IsAdmin, user.Addresses.Select(ToAddress).ToList());
+        new(user.Id, user.Username, user.FullName, user.Email, user.PhoneNumber, ToRole(user), user.IsAdmin, user.Addresses.Select(ToAddress).ToList());
 
     private static OrderDto ToOrder(Order order) =>
         new(
