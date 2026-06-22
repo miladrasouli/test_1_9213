@@ -148,6 +148,18 @@ public static class StoreEndpoints
             };
 
             db.Products.Add(product);
+
+            var slugExists = await db.Products.AnyAsync(p => p.Slug == request.Slug);
+
+            if (slugExists)
+            {
+                return Results.BadRequest(new
+                {
+                    message = "اسلاگ محصول تکراری است"
+                });
+            }
+
+
             await db.SaveChangesAsync();
             return Results.Created($"/api/products/{product.Slug}", new { product.Id, product.Slug });
         });
