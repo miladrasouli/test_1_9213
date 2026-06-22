@@ -544,13 +544,30 @@ function AdminView() {
   const [orders, setOrders] = useState<OrderDto[]>([]);
   const [adminProducts, setAdminProducts] = useState<ProductSummaryDto[]>([]);
   const [adminMessage, setAdminMessage] = useState('');
-  const { register, handleSubmit, reset } = useForm<ProductFormValues>({
-    defaultValues: {
-      imageUrls: asset('img/products/01.jpg'),
-      specifications: 'Color: Black\nWarranty: 18 months',
-    },
-  });
   const [categories, setCategories] = useState<CategoryDto[]>([]);
+  const [specRows, setSpecRows] = useState<Array<{ key: string; value: string }>>([
+    { key: 'رنگ', value: 'مشکی' },
+    { key: 'گارانتی', value: '۱۸ ماه' },
+  ]);
+
+  const productDefaultValues: ProductFormValues = {
+    categoryId: '',
+    name: '',
+    slug: '',
+    shortDescription: '',
+    description: '',
+    brand: '',
+    price: '0',
+    compareAtPrice: '',
+    stockQuantity: '0',
+    isFeatured: false,
+    imageUrls: asset('img/products/01.jpg'),
+    specifications: '',
+  };
+
+  const { register, handleSubmit, reset } = useForm<ProductFormValues>({
+    defaultValues: productDefaultValues,
+  });
 
   const reloadAdminData = () => {
     api.getDashboard().then(setDashboard);
@@ -563,40 +580,112 @@ function AdminView() {
     reloadAdminData();
   }, []);
 
+  const updateSpecRow = (index: number, field: 'key' | 'value', value: string) => {
+    setSpecRows((rows) => rows.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)));
+  };
+
+  const addSpecRow = () => {
+    setSpecRows((rows) => [...rows, { key: '', value: '' }]);
+  };
+
+  const removeSpecRow = (index: number) => {
+    setSpecRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index));
+  };
+
+  const resetProductForm = () => {
+    reset(productDefaultValues);
+    setSpecRows([
+      { key: 'رنگ', value: 'مشکی' },
+      { key: 'گارانتی', value: '۱۸ ماه' },
+    ]);
+  };
+
   const createProduct = (values: ProductFormValues) => {
+    if (!values.categoryId) {
+      setAdminMessage('لطفاً دسته‌بندی محصول را انتخاب کنید.');
+      return;
+    }
+
+    if (!values.name?.trim() || !values.slug?.trim()) {
+      setAdminMessage('نام محصول و اسلاگ الزامی است.');
+      return;
+    }
+
+    const price = Number(values.price || 0);
+    const stockQuantity = Number(values.stockQuantity || 0);
+    const compareAtPrice = values.compareAtPrice ? Number(values.compareAtPrice) : null;
+
+    if (!Number.isFinite(price) || price <= 0) {
+      setAdminMessage('قیمت محصول باید عددی و بزرگ‌تر از صفر باشد.');
+      return;
+    }
+
+    if (!Number.isFinite(stockQuantity) || stockQuantity < 0) {
+      setAdminMessage('موجودی محصول باید عددی و صفر یا بیشتر باشد.');
+      return;
+    }
+
+    const specifications = specRows
+      .map((row, index) => ({
+        key: row.key.trim(),
+        value: row.value.trim(),
+        sortOrder: index + 1,
+      }))
+      .filter((row) => row.key && row.value);
+
     const payload: UpsertProductPayload = {
       categoryId: values.categoryId,
-      name: values.name,
-      slug: values.slug,
-      shortDescription: values.shortDescription,
-      description: values.description,
-      brand: values.brand,
-      price: Number(values.price),
-      compareAtPrice: values.compareAtPrice ? Number(values.compareAtPrice) : null,
-      stockQuantity: Number(values.stockQuantity),
+      name: values.name.trim(),
+      slug: values.slug.trim(),
+      shortDescription: values.shortDescription?.trim() || values.name.trim(),
+      description: values.description?.trim() || values.shortDescription?.trim() || values.name.trim(),
+      brand: values.brand?.trim() || 'ShopSuite',
+      price,
+      compareAtPrice: Number.isFinite(compareAtPrice) ? compareAtPrice : null,
+      stockQuantity,
       isFeatured: Boolean(values.isFeatured),
-      imageUrls: values.imageUrls.split('\n').filter(Boolean),
-      specifications: parseSpecifications(values.specifications),
+      imageUrls: values.imageUrls.split('\n').map((x) => x.trim()).filter(Boolean),
+      specifications,
     };
-    api.createProduct(payload).then((created) => {
-      setAdminMessage(`محصول با اسلاگ ${created.slug} ثبت شد.`);
-      reset({ imageUrls: asset('img/products/01.jpg'), specifications: 'Color: Black\nWarranty: 18 months' });
-      reloadAdminData();
-    });
+
+    api.createProduct(payload)
+      .then((created) => {
+        setAdminMessage(`محصول با اسلاگ ${created.slug} ثبت شد.`);
+        resetProductForm();
+        reloadAdminData();
+      })
+      .catch((error: Error) => {
+        setAdminMessage(error.message || 'ثبت محصول ناموفق بود.');
+      });
   };
 
   return (
-    <section className="page">
-      <div className="stats">
+    <section className="page admin-page">
+      <div className="admin-dashboard">
         <Stat icon={Boxes} label="محصولات" value={dashboard?.productCount ?? 0} />
+        <Stat icon={LayoutGrid} label="دسته‌بندی‌ها" value={dashboard?.categoryCount ?? 0} />
         <Stat icon={ReceiptText} label="سفارش‌ها" value={dashboard?.orderCount ?? 0} />
-        <Stat icon={BarChart3} label="فروش کل" value={money(dashboard?.totalSales ?? 0)} />
+        <Stat icon={ShoppingBag} label="فروش کل" value={money(dashboard?.totalSales ?? 0)} />
       </div>
-      <div className="admin-layout">
-        <form className="section-card form-grid" onSubmit={handleSubmit(createProduct)}>
-          <h2><PackagePlus size={18} /> ثبت محصول</h2>
-          {adminMessage && <p className="success">{adminMessage}</p>}
-          <select {...register('categoryId')}>{categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select>
+
+      <div className="admin-grid">
+        <form className="section-card admin-form" onSubmit={handleSubmit(createProduct)}>
+          <div className="section-heading">
+            <h2>ثبت محصول</h2>
+            <span>همراه با مشخصات محصول</span>
+          </div>
+
+          {adminMessage && <div className="admin-message">{adminMessage}</div>}
+
+          <select {...register('categoryId')}>
+            <option value="">انتخاب دسته‌بندی</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+
           {[
             ['name', 'نام محصول'],
             ['slug', 'اسلاگ'],
@@ -606,21 +695,67 @@ function AdminView() {
             ['price', 'قیمت'],
             ['compareAtPrice', 'قیمت قبل'],
             ['stockQuantity', 'موجودی'],
-          ].map(([field, label]) => <input key={field} placeholder={label} {...register(field as keyof ProductFormValues)} />)}
-          <textarea placeholder="هر آدرس تصویر در یک خط" {...register('imageUrls')} />
-          <textarea placeholder="هر مشخصه در یک خط، مثلا: رنگ: مشکی" {...register('specifications')} />
-          <label className="check"><input type="checkbox" {...register('isFeatured')} /> محصول ویژه</label>
+          ].map(([field, label]) => (
+            <input key={field} placeholder={label} {...register(field as keyof ProductFormValues)} />
+          ))}
+
+          <textarea
+            placeholder="آدرس تصاویر؛ هر تصویر در یک خط"
+            rows={3}
+            {...register('imageUrls')}
+          />
+
+          <div className="product-spec-panel">
+            <div className="product-spec-header">
+              <div>
+                <h3>مشخصات محصول</h3>
+                <p>مثلاً رنگ، وزن، گارانتی، جنس بدنه، حافظه، سایز و...</p>
+              </div>
+              <button type="button" className="secondary" onClick={addSpecRow}>
+                افزودن مشخصه
+              </button>
+            </div>
+
+            <div className="product-spec-list">
+              {specRows.map((row, index) => (
+                <div className="product-spec-row" key={index}>
+                  <input
+                    value={row.key}
+                    onChange={(event) => updateSpecRow(index, 'key', event.target.value)}
+                    placeholder="عنوان مشخصه، مثلا رنگ"
+                  />
+                  <input
+                    value={row.value}
+                    onChange={(event) => updateSpecRow(index, 'value', event.target.value)}
+                    placeholder="مقدار، مثلا مشکی"
+                  />
+                  <button type="button" className="danger-light" onClick={() => removeSpecRow(index)}>
+                    حذف
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <label className="check">
+            <input type="checkbox" {...register('isFeatured')} />
+            محصول ویژه
+          </label>
+
           <button className="primary">ثبت محصول</button>
         </form>
+
         <div className="section-card">
           <h2>سوابق فروش</h2>
           <OrderList orders={orders} />
         </div>
+
         <div className="section-card">
           <div className="section-heading">
             <h2>کالاهای ثبت‌شده</h2>
             <span>{adminProducts.length} کالا</span>
           </div>
+
           <div className="admin-product-list">
             {adminProducts.map((product, index) => (
               <div key={product.id}>
@@ -637,6 +772,7 @@ function AdminView() {
     </section>
   );
 }
+
 
 function Stat({ icon: Icon, label, value }: { icon: IconComponent; label: string; value: string | number }) {
   return <div className="stat"><Icon size={22} /><span>{label}</span><strong>{value}</strong></div>;
