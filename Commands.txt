@@ -1,6 +1,6 @@
 git init
 git add .
-git commit -m "FirstCommit"
+git commit -m "commit_1"
 git remote add origin https://github.com/miladrasouli/test_1_9213.git
 git branch -M main
 git push -u origin main
@@ -8,7 +8,7 @@ git push -u origin main
 ---------------------------------------------------
 git status
 git add .
-git commit -m "14050331_11_50"
+git commit -m "commit_1"
 git push -u origin master
 
 ------------------------------------------------------
