@@ -1,0 +1,55 @@
+git init
+git add .
+git commit -m "FirstCommit"
+git remote add origin https://github.com/miladrasouli/test_1_9213.git
+git branch -M main
+git push -u origin main
+
+---------------------------------------------------
+git status
+git add .
+git commit -m "14050331_11_50"
+git push -u origin master
+
+------------------------------------------------------
+
+
+# 1. مطمئن شوید در برنچ main هستید
+git checkout main
+
+# 2. آخرین تغییرات را دریافت کنید (اختیاری اما توصیه شده)
+git pull origin main
+
+# 3. ساخت برنچ dev و سوئیچ به آن (یکجا)
+git checkout -b dev
+
+# 4. تغییرات خود را انجام دهید، سپس:
+git add .
+git commit -m "Add Priority To Menu Table And Service"
+
+# 5. push برنچ dev به remote
+git push -u origin dev
+
+
+
+
+------------------------------
+
+git pull origin main --allow-unrelated-histories
+
+git add README.md
+git commit -m "fix: resolve merge conflict"
+
+---------------------------------------------
+
+# 1. دریافت تغییرات اما بدون مرج کردن (فقط دانلود)
+git fetch origin
+
+# 2. تنظیم شاخه لوکال روی وضعیت راه دور (بدون تغییر فایل‌های تو)
+git reset --soft origin/main
+
+# 3. کامیت کردن مجدد فایل‌های تو
+git commit -m "feat: initial commit - overwrite remote"
+
+# 4. پوش کردن با زور! (Force Push)
+git push origin main --force

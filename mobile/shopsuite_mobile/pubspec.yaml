@@ -1,0 +1,39 @@
+name: shopsuite_mobile
+description: ShopSuite mobile app built with Flutter and BLoC.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_bloc: ^8.1.6
+  equatable: ^2.0.5
+  dio: ^5.7.0
+  intl: ^0.20.2
+  cached_network_image: ^3.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/didikala/img/
+    - assets/didikala/img/banner/
+    - assets/didikala/img/category/
+    - assets/didikala/img/main-slider/
+    - assets/didikala/img/products/
+    - assets/didikala/img/theme/
+  fonts:
+    - family: Shabnam
+      fonts:
+        - asset: assets/didikala/fonts/shabnam/Shabnam.ttf
+        - asset: assets/didikala/fonts/shabnam/Shabnam-Bold.ttf
+          weight: 700
