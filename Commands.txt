@@ -8,8 +8,8 @@ git push -u origin main
 ---------------------------------------------------
 git status
 git add .
-git commit -m "commit_2"
-git push -u origin master
+git commit -m "14050401_16_01"
+git push -u origin main
 
 ------------------------------------------------------
 
