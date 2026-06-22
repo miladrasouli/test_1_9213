@@ -47,7 +47,6 @@ if (app.Environment.IsDevelopment())
     EnsureProductSpecifications(db);
 }
 
-// مهم: در Development این را فعال نکن چون باعث Redirect شدن preflight می‌شود
 if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();

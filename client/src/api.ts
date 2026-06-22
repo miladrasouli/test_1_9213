@@ -145,9 +145,42 @@ export type UpsertProductPayload = {
   specifications: Array<{ key: string; value: string; sortOrder: number }>;
 };
 
+function normalizeNumber(value: unknown, fallback = 0): number {
+  if (value === null || value === undefined || value === '') return fallback;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function normalizeProductPayload(payload: UpsertProductPayload): UpsertProductPayload {
+  return {
+    ...payload,
+    price: normalizeNumber(payload.price, 0),
+    compareAtPrice: normalizeNullableNumber(payload.compareAtPrice),
+    stockQuantity: normalizeNumber(payload.stockQuantity, 0),
+    isFeatured: Boolean(payload.isFeatured),
+    imageUrls: (payload.imageUrls ?? []).map((x) => String(x).trim()).filter(Boolean),
+    specifications: (payload.specifications ?? [])
+      .map((spec, index) => ({
+        key: String(spec.key ?? '').trim(),
+        value: String(spec.value ?? '').trim(),
+        sortOrder: normalizeNumber(spec.sortOrder, index + 1),
+      }))
+      .filter((spec) => spec.key && spec.value),
+  };
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers ?? {}),
+    },
     ...options,
   });
 
@@ -173,12 +206,19 @@ export const api = {
   getProducts: (params: ProductQuery = {}) => request<ProductsResponse>(`/products?${toQueryString(params)}`),
   getBestSellers: () => request<ProductSummaryDto[]>('/products/best-sellers'),
   getProduct: (slug: string) => request<ProductDetailDto>(`/products/${slug}`),
-  createProduct: (payload: UpsertProductPayload) => request<{ id: string; slug: string }>('/admin/products', { method: 'POST', body: JSON.stringify(payload) }),
-  updateProfile: (userId: string, payload: Pick<UserProfileDto, 'fullName' | 'email' | 'phoneNumber'>) => request<void>(`/customers/${userId}/profile`, { method: 'PUT', body: JSON.stringify(payload) }),
+  createProduct: (payload: UpsertProductPayload) =>
+    request<{ id: string; slug: string }>('/admin/products', {
+      method: 'POST',
+      body: JSON.stringify(normalizeProductPayload(payload)),
+    }),
+  updateProfile: (userId: string, payload: Pick<UserProfileDto, 'fullName' | 'phoneNumber'>) =>
+    request<UserProfileDto>(`/customers/${userId}/profile`, { method: 'PUT', body: JSON.stringify(payload) }),
   getProfile: (userId: string) => request<UserProfileDto>(`/customers/${userId}/profile`),
-  addAddress: (userId: string, payload: Omit<AddressDto, 'id'>) => request<AddressDto>(`/customers/${userId}/addresses`, { method: 'POST', body: JSON.stringify(payload) }),
+  addAddress: (userId: string, payload: Omit<AddressDto, 'id'>) =>
+    request<AddressDto>(`/customers/${userId}/addresses`, { method: 'POST', body: JSON.stringify(payload) }),
   getOrders: (userId: string) => request<OrderDto[]>(`/customers/${userId}/orders`),
-  createOrder: (payload: CreateOrderPayload) => request<OrderDto>('/orders', { method: 'POST', body: JSON.stringify(payload) }),
+  createOrder: (payload: CreateOrderPayload) =>
+    request<OrderDto>('/orders', { method: 'POST', body: JSON.stringify(payload) }),
   getAdminOrders: () => request<OrderDto[]>('/admin/orders'),
   getDashboard: () => request<DashboardDto>('/admin/dashboard'),
   getArticles: () => request<ArticleDto[]>('/articles'),
