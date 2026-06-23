@@ -17,6 +17,10 @@ public class ShopDbContext(DbContextOptions<ShopDbContext> options) : DbContext(
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<Article> Articles => Set<Article>();
+    public DbSet<FooterSection> FooterSections => Set<FooterSection>();
+    public DbSet<FooterLink> FooterLinks => Set<FooterLink>();
+    public DbSet<SiteMenuItem> SiteMenuItems => Set<SiteMenuItem>();
+    public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -30,6 +34,10 @@ public class ShopDbContext(DbContextOptions<ShopDbContext> options) : DbContext(
         modelBuilder.Entity<Order>().HasIndex(x => x.OrderNumber).IsUnique();
         modelBuilder.Entity<Invoice>().HasIndex(x => x.InvoiceNumber).IsUnique();
         modelBuilder.Entity<ProductSpecification>().HasIndex(x => new { x.ProductId, x.SortOrder });
+        modelBuilder.Entity<FooterSection>().HasIndex(x => x.SortOrder);
+        modelBuilder.Entity<FooterLink>().HasIndex(x => new { x.FooterSectionId, x.SortOrder });
+        modelBuilder.Entity<SiteMenuItem>().HasIndex(x => new { x.Location, x.SortOrder });
+        modelBuilder.Entity<SiteSetting>().HasIndex(x => x.Key).IsUnique();
 
         modelBuilder.Entity<Product>().Property(x => x.Price).HasPrecision(18, 2);
         modelBuilder.Entity<Product>().Property(x => x.CompareAtPrice).HasPrecision(18, 2);
@@ -46,6 +54,10 @@ public class ShopDbContext(DbContextOptions<ShopDbContext> options) : DbContext(
         modelBuilder.Entity<ProductSpecification>().Property(x => x.Value).HasMaxLength(500);
         modelBuilder.Entity<AppUser>().Property(x => x.Username).HasMaxLength(80);
         modelBuilder.Entity<AppUser>().Property(x => x.PasswordHash).HasMaxLength(128);
+        modelBuilder.Entity<SiteMenuItem>().Property(x => x.Location).HasMaxLength(40);
+        modelBuilder.Entity<SiteMenuItem>().Property(x => x.ViewKey).HasMaxLength(40);
+        modelBuilder.Entity<FooterLink>().Property(x => x.ViewKey).HasMaxLength(40);
+        modelBuilder.Entity<SiteSetting>().Property(x => x.Key).HasMaxLength(80);
 
         Seed(modelBuilder);
     }

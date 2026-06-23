@@ -6,6 +6,7 @@ import { money, productImage } from '../utils/shop';
 export function CartView() {
   const { cart, updateQuantity, removeFromCart, clearCart, cartTotal, currentUser, setActiveView } = useShopStore();
   const [message, setMessage] = useState('');
+  const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const submitOrder = async () => {
     if (!currentUser) {
       setMessage('برای ثبت سفارش ابتدا وارد حساب کاربری شوید.');
@@ -28,7 +29,7 @@ export function CartView() {
       <div className="section-card">
         <div className="section-heading">
           <h2>سبد خرید</h2>
-          <span>{cart.length} کالا</span>
+          <span>{cartItemCount} کالا</span>
         </div>
         <div className="cart-list">
           {cart.map((item, index) => (

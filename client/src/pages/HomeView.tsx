@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { CategoryDto, ProductSummaryDto } from '../api';
+import type { CategoryDto, ProductSummaryDto, SiteSettingsDto } from '../api';
 import { api } from '../api';
 import { useShopStore } from '../store';
 import { asset } from '../utils/shop';
@@ -9,9 +9,11 @@ export function HomeView({ categories }: { categories: CategoryDto[] }) {
   const { filters, setFilters } = useShopStore();
   const [products, setProducts] = useState<ProductSummaryDto[]>([]);
   const [bestSellers, setBestSellers] = useState<ProductSummaryDto[]>([]);
+  const [settings, setSettings] = useState<SiteSettingsDto | null>(null);
 
   useEffect(() => {
     api.getBestSellers().then(setBestSellers);
+    api.getSiteSettings().then(setSettings);
   }, []);
 
   useEffect(() => {
@@ -31,6 +33,18 @@ export function HomeView({ categories }: { categories: CategoryDto[] }) {
         </div>
       </div>
 
+      {settings?.topBannerImageUrl && (
+        settings.topBannerLink ? (
+          <a className="home-best-seller-banner" href={settings.topBannerLink} target="_blank" rel="noreferrer">
+            <img src={settings.topBannerImageUrl} alt={settings.topBannerAlt || 'بنر فروشگاه'} />
+          </a>
+        ) : (
+          <div className="home-best-seller-banner">
+            <img src={settings.topBannerImageUrl} alt={settings.topBannerAlt || 'بنر فروشگاه'} />
+          </div>
+        )
+      )}
+
       <section className="amazing-section">
         <div className="amazing-title">
           <img src={asset('img/theme/amazing.svg')} alt="" />
@@ -43,6 +57,14 @@ export function HomeView({ categories }: { categories: CategoryDto[] }) {
       </section>
 
       <div className="toolbar-card">
+        {filters.search && (
+          <div className="active-search-chip">
+            <span>نتیجه جستجو برای «{filters.search}»</span>
+            <button type="button" onClick={() => setFilters({ search: '', categoryId: '' })}>
+              حذف جستجو
+            </button>
+          </div>
+        )}
         <select value={filters.categoryId ?? ''} onChange={(event) => setFilters({ categoryId: event.target.value })}>
           <option value="">همه دسته‌بندی‌ها</option>
           {categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}

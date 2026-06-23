@@ -16,6 +16,7 @@ export type AuthUserDto = {
   phoneNumber: string;
   role: 'Admin' | 'Customer' | string;
   isAdmin: boolean;
+  isActive: boolean;
 };
 
 export type ProductSummaryDto = {
@@ -90,7 +91,26 @@ export type UserProfileDto = {
   phoneNumber: string;
   role: string;
   isAdmin: boolean;
+  isActive: boolean;
   addresses: AddressDto[];
+};
+
+export type AdminUserActivityDto = {
+  occurredAt: string;
+  type: string;
+  title: string;
+  description: string;
+};
+
+export type AdminUserDetailDto = {
+  profile: UserProfileDto;
+  createdAt: string;
+  orderCount: number;
+  totalSpent: number;
+  paidTotal: number;
+  lastOrderAt?: string | null;
+  orders: OrderDto[];
+  activities: AdminUserActivityDto[];
 };
 
 export type OrderDto = {
@@ -140,12 +160,56 @@ export type DashboardDto = {
   recentOrders: OrderDto[];
 };
 
+export type FooterLinkDto = {
+  id: string;
+  footerSectionId: string;
+  label: string;
+  viewKey: string;
+  sortOrder: number;
+  isActive: boolean;
+};
+
+export type FooterSectionDto = {
+  id: string;
+  title: string;
+  sortOrder: number;
+  isActive: boolean;
+  links: FooterLinkDto[];
+};
+
+export type SiteMenuItemDto = {
+  id: string;
+  location: string;
+  label: string;
+  viewKey: string;
+  icon: string;
+  sortOrder: number;
+  isActive: boolean;
+};
+
+export type SiteSettingsDto = {
+  topBannerImageUrl: string;
+  topBannerLink: string;
+  topBannerAlt: string;
+  bestSellerTake: number;
+};
+
 export type CreateOrderPayload = {
   userId: string;
   addressId: string | null;
   notes?: string | null;
   items: Array<{ productId: string; quantity: number }>;
 };
+
+export type RegisterPayload = {
+  username: string;
+  password: string;
+  fullName: string;
+  email: string;
+  phoneNumber: string;
+};
+
+export type UpdateAdminUserPayload = Pick<UserProfileDto, 'fullName' | 'email' | 'phoneNumber' | 'isAdmin' | 'isActive'>;
 
 export type UpsertProductPayload = {
   categoryId: string;
@@ -161,6 +225,11 @@ export type UpsertProductPayload = {
   imageUrls: string[];
   specifications: Array<{ key: string; value: string; sortOrder: number }>;
 };
+
+export type UpsertFooterSectionPayload = Omit<FooterSectionDto, 'id' | 'links'>;
+export type UpsertFooterLinkPayload = Omit<FooterLinkDto, 'id'>;
+export type UpsertSiteMenuItemPayload = Omit<SiteMenuItemDto, 'id'>;
+export type UpsertSiteSettingsPayload = SiteSettingsDto;
 
 async function request<T>(path: string, options: RequestInit & { userId?: string } = {}): Promise<T> {
   const { userId, ...fetchOptions } = options;
@@ -188,6 +257,7 @@ function toQueryString(params: ProductQuery): string {
 
 export const api = {
   login: (username: string, password: string) => request<AuthUserDto>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  register: (payload: RegisterPayload) => request<UserProfileDto>('/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
   me: (userId: string) => request<AuthUserDto>('/auth/me', { userId }),
   getCategories: () => request<CategoryDto[]>('/categories'),
   getProducts: (params: ProductQuery = {}) => request<ProductsResponse>(`/products?${toQueryString(params)}`),
@@ -208,14 +278,35 @@ export const api = {
     return response.json() as Promise<UploadedProductImageDto[]>;
   },
   createProduct: (payload: UpsertProductPayload, userId: string) => request<{ id: string; slug: string }>('/admin/products', { method: 'POST', body: JSON.stringify(payload), userId }),
+  updateProduct: (id: string, payload: UpsertProductPayload, userId: string) => request<void>(`/admin/products/${id}`, { method: 'PUT', body: JSON.stringify(payload), userId }),
+  deleteProduct: (id: string, userId: string) => request<void>(`/admin/products/${id}`, { method: 'DELETE', userId }),
   updateProfile: (userId: string, payload: Pick<UserProfileDto, 'fullName' | 'email' | 'phoneNumber'>) => request<void>(`/customers/${userId}/profile`, { method: 'PUT', body: JSON.stringify(payload) }),
   getProfile: (userId: string) => request<UserProfileDto>(`/customers/${userId}/profile`),
   addAddress: (userId: string, payload: Omit<AddressDto, 'id'>) => request<AddressDto>(`/customers/${userId}/addresses`, { method: 'POST', body: JSON.stringify(payload) }),
   getOrders: (userId: string) => request<OrderDto[]>(`/customers/${userId}/orders`),
   createOrder: (payload: CreateOrderPayload) => request<OrderDto>('/orders', { method: 'POST', body: JSON.stringify(payload) }),
   getAdminOrders: (userId: string) => request<OrderDto[]>('/admin/orders', { userId }),
+  getAdminUsers: (userId: string) => request<UserProfileDto[]>('/admin/users', { userId }),
+  getAdminUserDetail: (targetUserId: string, userId: string) => request<AdminUserDetailDto>(`/admin/users/${targetUserId}`, { userId }),
+  updateAdminUser: (targetUserId: string, payload: UpdateAdminUserPayload, userId: string) => request<void>(`/admin/users/${targetUserId}`, { method: 'PUT', body: JSON.stringify(payload), userId }),
   getDashboard: (userId: string) => request<DashboardDto>('/admin/dashboard', { userId }),
   getArticles: () => request<ArticleDto[]>('/articles'),
+  getFooter: () => request<FooterSectionDto[]>('/footer'),
+  getMenus: (location?: string) => request<SiteMenuItemDto[]>(`/menus${location ? `?location=${encodeURIComponent(location)}` : ''}`),
+  getSiteSettings: () => request<SiteSettingsDto>('/site-settings'),
+  getAdminSiteSettings: (userId: string) => request<SiteSettingsDto>('/admin/site-settings', { userId }),
+  updateSiteSettings: (payload: UpsertSiteSettingsPayload, userId: string) => request<void>('/admin/site-settings', { method: 'PUT', body: JSON.stringify(payload), userId }),
+  getAdminFooterSections: (userId: string) => request<FooterSectionDto[]>('/admin/footer-sections', { userId }),
+  createFooterSection: (payload: UpsertFooterSectionPayload, userId: string) => request<FooterSectionDto>('/admin/footer-sections', { method: 'POST', body: JSON.stringify(payload), userId }),
+  updateFooterSection: (id: string, payload: UpsertFooterSectionPayload, userId: string) => request<void>(`/admin/footer-sections/${id}`, { method: 'PUT', body: JSON.stringify(payload), userId }),
+  deleteFooterSection: (id: string, userId: string) => request<void>(`/admin/footer-sections/${id}`, { method: 'DELETE', userId }),
+  createFooterLink: (payload: UpsertFooterLinkPayload, userId: string) => request<FooterLinkDto>('/admin/footer-links', { method: 'POST', body: JSON.stringify(payload), userId }),
+  updateFooterLink: (id: string, payload: UpsertFooterLinkPayload, userId: string) => request<void>(`/admin/footer-links/${id}`, { method: 'PUT', body: JSON.stringify(payload), userId }),
+  deleteFooterLink: (id: string, userId: string) => request<void>(`/admin/footer-links/${id}`, { method: 'DELETE', userId }),
+  getAdminMenus: (userId: string) => request<SiteMenuItemDto[]>('/admin/menus', { userId }),
+  createMenuItem: (payload: UpsertSiteMenuItemPayload, userId: string) => request<SiteMenuItemDto>('/admin/menus', { method: 'POST', body: JSON.stringify(payload), userId }),
+  updateMenuItem: (id: string, payload: UpsertSiteMenuItemPayload, userId: string) => request<void>(`/admin/menus/${id}`, { method: 'PUT', body: JSON.stringify(payload), userId }),
+  deleteMenuItem: (id: string, userId: string) => request<void>(`/admin/menus/${id}`, { method: 'DELETE', userId }),
   getAbout: () => request<{ title: string; body: string; supportPhone: string; email: string }>('/about'),
 };
 

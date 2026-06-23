@@ -37,6 +37,7 @@ if (app.Environment.IsDevelopment())
     db.Database.EnsureCreated();
     EnsureUserCredentials(db);
     EnsureProductSpecifications(db);
+    EnsureContentManagement(db);
     EnsureSampleCustomerData(db);
 }
 
@@ -57,6 +58,9 @@ static void EnsureUserCredentials(ShopDbContext db)
 
             IF COL_LENGTH('Users', 'PasswordHash') IS NULL
                 ALTER TABLE [Users] ADD [PasswordHash] nvarchar(128) NOT NULL CONSTRAINT [DF_Users_PasswordHash] DEFAULT N'';
+
+            IF COL_LENGTH('Users', 'IsActive') IS NULL
+                ALTER TABLE [Users] ADD [IsActive] bit NOT NULL CONSTRAINT [DF_Users_IsActive] DEFAULT CAST(1 AS bit);
             """);
     }
 
@@ -69,12 +73,14 @@ static void EnsureUserCredentials(ShopDbContext db)
     {
         admin.Username = "admin";
         admin.PasswordHash = ShopDbContext.HashPassword("Admin@123");
+        admin.IsActive = true;
     }
 
     if (customer is not null)
     {
         customer.Username = "customer";
         customer.PasswordHash = ShopDbContext.HashPassword("Customer@123");
+        customer.IsActive = true;
     }
 
     db.SaveChanges();
@@ -129,6 +135,14 @@ static void EnsureProductSpecifications(ShopDbContext db)
         new ProductSpecification { ProductId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4"), Key = "Pressure", Value = "15 bar", SortOrder = 1 },
         new ProductSpecification { ProductId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4"), Key = "Tank", Value = "Washable removable tank", SortOrder = 2 });
     db.SaveChanges();
+}
+
+static void EnsureSetting(ShopDbContext db, string key, string value)
+{
+    if (!db.SiteSettings.Any(x => x.Key == key))
+    {
+        db.SiteSettings.Add(new SiteSetting { Key = key, Value = value });
+    }
 }
 
 static void EnsureSampleCustomerData(ShopDbContext db)
@@ -221,5 +235,101 @@ static void EnsureSampleCustomerData(ShopDbContext db)
     };
 
     db.Orders.Add(order);
+    db.SaveChanges();
+}
+
+static void EnsureContentManagement(ShopDbContext db)
+{
+    if (!db.Database.IsInMemory())
+    {
+        db.Database.ExecuteSqlRaw("""
+            IF OBJECT_ID(N'[FooterSections]', N'U') IS NULL
+            BEGIN
+                CREATE TABLE [FooterSections] (
+                    [Id] uniqueidentifier NOT NULL,
+                    [Title] nvarchar(max) NOT NULL,
+                    [SortOrder] int NOT NULL,
+                    [IsActive] bit NOT NULL,
+                    CONSTRAINT [PK_FooterSections] PRIMARY KEY ([Id])
+                );
+                CREATE INDEX [IX_FooterSections_SortOrder] ON [FooterSections] ([SortOrder]);
+            END
+
+            IF OBJECT_ID(N'[FooterLinks]', N'U') IS NULL
+            BEGIN
+                CREATE TABLE [FooterLinks] (
+                    [Id] uniqueidentifier NOT NULL,
+                    [FooterSectionId] uniqueidentifier NOT NULL,
+                    [Label] nvarchar(max) NOT NULL,
+                    [ViewKey] nvarchar(40) NOT NULL,
+                    [SortOrder] int NOT NULL,
+                    [IsActive] bit NOT NULL,
+                    CONSTRAINT [PK_FooterLinks] PRIMARY KEY ([Id]),
+                    CONSTRAINT [FK_FooterLinks_FooterSections_FooterSectionId] FOREIGN KEY ([FooterSectionId]) REFERENCES [FooterSections] ([Id]) ON DELETE CASCADE
+                );
+                CREATE INDEX [IX_FooterLinks_FooterSectionId_SortOrder] ON [FooterLinks] ([FooterSectionId], [SortOrder]);
+            END
+
+            IF OBJECT_ID(N'[SiteMenuItems]', N'U') IS NULL
+            BEGIN
+                CREATE TABLE [SiteMenuItems] (
+                    [Id] uniqueidentifier NOT NULL,
+                    [Location] nvarchar(40) NOT NULL,
+                    [Label] nvarchar(max) NOT NULL,
+                    [ViewKey] nvarchar(40) NOT NULL,
+                    [Icon] nvarchar(max) NOT NULL,
+                    [SortOrder] int NOT NULL,
+                    [IsActive] bit NOT NULL,
+                    CONSTRAINT [PK_SiteMenuItems] PRIMARY KEY ([Id])
+                );
+                CREATE INDEX [IX_SiteMenuItems_Location_SortOrder] ON [SiteMenuItems] ([Location], [SortOrder]);
+            END
+
+            IF OBJECT_ID(N'[SiteSettings]', N'U') IS NULL
+            BEGIN
+                CREATE TABLE [SiteSettings] (
+                    [Id] uniqueidentifier NOT NULL,
+                    [Key] nvarchar(80) NOT NULL,
+                    [Value] nvarchar(max) NOT NULL,
+                    CONSTRAINT [PK_SiteSettings] PRIMARY KEY ([Id])
+                );
+                CREATE UNIQUE INDEX [IX_SiteSettings_Key] ON [SiteSettings] ([Key]);
+            END
+            """);
+    }
+
+    if (!db.FooterSections.Any())
+    {
+        var guide = new FooterSection { Title = "راهنمای خرید", SortOrder = 1, IsActive = true };
+        var service = new FooterSection { Title = "خدمات مشتریان", SortOrder = 2, IsActive = true };
+        var admin = new FooterSection { Title = "پنل فروشگاه", SortOrder = 3, IsActive = true };
+        db.FooterSections.AddRange(guide, service, admin);
+        db.FooterLinks.AddRange(
+            new FooterLink { FooterSection = guide, Label = "صفحه اصلی", ViewKey = "home", SortOrder = 1, IsActive = true },
+            new FooterLink { FooterSection = guide, Label = "سبد خرید", ViewKey = "cart", SortOrder = 2, IsActive = true },
+            new FooterLink { FooterSection = guide, Label = "سوالات متداول", ViewKey = "faq", SortOrder = 3, IsActive = true },
+            new FooterLink { FooterSection = service, Label = "پروفایل کاربری", ViewKey = "profile", SortOrder = 1, IsActive = true },
+            new FooterLink { FooterSection = service, Label = "سفارش‌های من", ViewKey = "orders", SortOrder = 2, IsActive = true },
+            new FooterLink { FooterSection = service, Label = "مجله فروشگاه", ViewKey = "articles", SortOrder = 3, IsActive = true },
+            new FooterLink { FooterSection = admin, Label = "پنل مدیریت", ViewKey = "admin", SortOrder = 1, IsActive = true },
+            new FooterLink { FooterSection = admin, Label = "ثبت محصول", ViewKey = "admin", SortOrder = 2, IsActive = true });
+    }
+
+    if (!db.SiteMenuItems.Any())
+    {
+        db.SiteMenuItems.AddRange(
+            new SiteMenuItem { Location = "Header", Label = "صفحه اصلی", ViewKey = "home", Icon = "Home", SortOrder = 1, IsActive = true },
+            new SiteMenuItem { Location = "Header", Label = "سبد خرید", ViewKey = "cart", Icon = "ShoppingBag", SortOrder = 2, IsActive = true },
+            new SiteMenuItem { Location = "Header", Label = "پروفایل", ViewKey = "profile", Icon = "UserRound", SortOrder = 3, IsActive = true },
+            new SiteMenuItem { Location = "Header", Label = "سفارش‌ها", ViewKey = "orders", Icon = "ReceiptText", SortOrder = 4, IsActive = true },
+            new SiteMenuItem { Location = "Header", Label = "مجله فروشگاه", ViewKey = "articles", Icon = "Newspaper", SortOrder = 5, IsActive = true },
+            new SiteMenuItem { Location = "Header", Label = "پنل مدیریت", ViewKey = "admin", Icon = "BarChart3", SortOrder = 6, IsActive = true });
+    }
+
+    EnsureSetting(db, "TopBannerImageUrl", "/didikala/img/banner/large-ads.jpg");
+    EnsureSetting(db, "TopBannerLink", "");
+    EnsureSetting(db, "TopBannerAlt", "بنر بالای فروشگاه");
+    EnsureSetting(db, "BestSellerTake", "8");
+
     db.SaveChanges();
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { LogIn, MapPin } from 'lucide-react';
+import { LogIn, MapPin, UserPlus } from 'lucide-react';
 import { api, type UserProfileDto } from '../api';
 import { useShopStore } from '../store';
 import { asset } from '../utils/shop';
@@ -8,14 +8,17 @@ import { asset } from '../utils/shop';
 type AddressFormValues = Omit<UserProfileDto['addresses'][number], 'id'>;
 type ProfileFormValues = Pick<UserProfileDto, 'fullName' | 'email' | 'phoneNumber'>;
 type LoginFormValues = { username: string; password: string };
+type RegisterFormValues = { username: string; password: string; fullName: string; email: string; phoneNumber: string };
 
 export function ProfileView() {
   const { currentUser, login, logout } = useShopStore();
   const [profile, setProfile] = useState<UserProfileDto | null>(null);
   const { register, handleSubmit, reset } = useForm<ProfileFormValues>();
   const loginForm = useForm<LoginFormValues>({ defaultValues: { username: 'admin', password: 'Admin@123' } });
+  const registerForm = useForm<RegisterFormValues>();
   const addressForm = useForm<AddressFormValues>();
   const [loginMessage, setLoginMessage] = useState('');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
 
   useEffect(() => {
     if (!currentUser) {
@@ -34,7 +37,15 @@ export function ProfileView() {
       login(user);
       setLoginMessage(`با نقش ${user.role} وارد شدید.`);
     })
-    .catch(() => setLoginMessage('نام کاربری یا رمز عبور اشتباه است.'));
+    .catch((error: Error) => setLoginMessage(error.message || 'نام کاربری یا رمز عبور اشتباه است.'));
+
+  const submitRegister = (values: RegisterFormValues) => api.register(values)
+    .then(() => {
+      registerForm.reset();
+      setAuthMode('login');
+      setLoginMessage('ثبت‌نام انجام شد. حساب شما بعد از تعیین نقش و فعال‌سازی توسط مدیر قابل ورود است.');
+    })
+    .catch((error: Error) => setLoginMessage(error.message));
 
   const saveProfile = (values: ProfileFormValues) => currentUser
     ? api.updateProfile(currentUser.id, values).then(() => api.getProfile(currentUser.id).then(setProfile))
@@ -46,23 +57,49 @@ export function ProfileView() {
   if (!currentUser) {
     return (
       <section className="page">
-        <form className="section-card form-grid auth-card" onSubmit={loginForm.handleSubmit(submitLogin)}>
-          <h2><LogIn size={18} /> ورود کاربر</h2>
-          <input placeholder="نام کاربری" {...loginForm.register('username')} />
-          <input placeholder="رمز عبور" type="password" {...loginForm.register('password')} />
-          <div className="login-hints">
-            <button type="button" className="secondary" onClick={() => {
-              loginForm.setValue('username', 'admin');
-              loginForm.setValue('password', 'Admin@123');
-            }}>ورود مدیر</button>
-            <button type="button" className="secondary" onClick={() => {
-              loginForm.setValue('username', 'customer');
-              loginForm.setValue('password', 'Customer@123');
-            }}>ورود مشتری</button>
+        <div className="auth-layout">
+          <div className="auth-visual" style={{ backgroundImage: `url(${asset('img/theme/page-cover.jpg')})` }}>
+            <strong>ShopSuite</strong>
+            <h1>ورود به حساب فروشگاهی</h1>
+            <p>بعد از ثبت‌نام، مدیر سایت حساب را فعال و نقش کاربر را مشخص می‌کند.</p>
           </div>
-          <button className="primary">ورود</button>
-          {loginMessage && <p className="success">{loginMessage}</p>}
-        </form>
+          <div className="section-card auth-card">
+            <div className="auth-tabs">
+              <button type="button" className={authMode === 'login' ? 'active' : ''} onClick={() => setAuthMode('login')}><LogIn size={17} /> ورود</button>
+              <button type="button" className={authMode === 'register' ? 'active' : ''} onClick={() => setAuthMode('register')}><UserPlus size={17} /> ثبت‌نام</button>
+            </div>
+            {authMode === 'login' && (
+              <form className="form-grid" onSubmit={loginForm.handleSubmit(submitLogin)}>
+                <h2>ورود کاربر</h2>
+                <input placeholder="نام کاربری" {...loginForm.register('username')} />
+                <input placeholder="رمز عبور" type="password" {...loginForm.register('password')} />
+                <div className="login-hints">
+                  <button type="button" className="secondary" onClick={() => {
+                    loginForm.setValue('username', 'admin');
+                    loginForm.setValue('password', 'Admin@123');
+                  }}>ورود مدیر</button>
+                  <button type="button" className="secondary" onClick={() => {
+                    loginForm.setValue('username', 'customer');
+                    loginForm.setValue('password', 'Customer@123');
+                  }}>ورود مشتری</button>
+                </div>
+                <button className="primary">ورود</button>
+              </form>
+            )}
+            {authMode === 'register' && (
+              <form className="form-grid" onSubmit={registerForm.handleSubmit(submitRegister)}>
+                <h2>ثبت‌نام کاربر جدید</h2>
+                <input placeholder="نام کامل" {...registerForm.register('fullName')} />
+                <input placeholder="نام کاربری" {...registerForm.register('username')} />
+                <input placeholder="ایمیل" type="email" {...registerForm.register('email')} />
+                <input placeholder="شماره تماس" {...registerForm.register('phoneNumber')} />
+                <input placeholder="رمز عبور" type="password" {...registerForm.register('password')} />
+                <button className="primary">ثبت‌نام و انتظار تایید مدیر</button>
+              </form>
+            )}
+            {loginMessage && <p className="success">{loginMessage}</p>}
+          </div>
+        </div>
       </section>
     );
   }

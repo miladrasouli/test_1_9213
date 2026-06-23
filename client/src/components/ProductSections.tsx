@@ -28,15 +28,23 @@ export function ProductGrid({ title, products }: { title: string; products: Prod
 
 export function ProductCard({ product, index = 0, compact = false }: { product: ProductSummaryDto; index?: number; compact?: boolean }) {
   const { addToCart, openProduct } = useShopStore();
+  const [added, setAdded] = useState(false);
+
+  const handleAddToCart = () => {
+    addToCart(product);
+    setAdded(true);
+    window.setTimeout(() => setAdded(false), 1500);
+  };
+
   return (
     <article className={compact ? 'product-card compact' : 'product-card'}>
-      <button className="product-image" onClick={() => openProduct(product.slug)}>
+      <button className="product-image" type="button" onClick={() => openProduct(product.slug)}>
         <img src={productImage(product, index)} alt={product.name} />
       </button>
       <div className="product-meta">
-        <button className="favorite" aria-label="افزودن به علاقه‌مندی"><Heart size={16} /></button>
+        <button className="favorite" type="button" aria-label="افزودن به علاقه‌مندی"><Heart size={16} /></button>
         <small>{product.categoryName} / {product.brand}</small>
-        <h3 onClick={() => openProduct(product.slug)}>{product.name}</h3>
+        <button className="product-title-button" type="button" onClick={() => openProduct(product.slug)}>{product.name}</button>
         <p>{product.shortDescription}</p>
         <div className="rating-row">
           <span>★ {product.rating}</span>
@@ -46,8 +54,9 @@ export function ProductCard({ product, index = 0, compact = false }: { product: 
           <strong>{money(product.price)}</strong>
           {product.compareAtPrice && <del>{money(product.compareAtPrice)}</del>}
         </div>
-        <button className="secondary detail-button" onClick={() => openProduct(product.slug)}>مشاهده جزئیات</button>
-        <button className="primary add-button" onClick={() => addToCart(product)}>افزودن به سبد</button>
+        <button className="secondary detail-button" type="button" onClick={() => openProduct(product.slug)}>مشاهده جزئیات</button>
+        <button className="primary add-button" type="button" onClick={handleAddToCart}>افزودن به سبد</button>
+        <span className="add-feedback">{added ? 'به سبد خرید اضافه شد' : ''}</span>
       </div>
     </article>
   );
@@ -57,6 +66,7 @@ export function ProductDetail() {
   const { selectedSlug, addToCart } = useShopStore();
   const [product, setProduct] = useState<ProductDetailDto | null>(null);
   const [selectedImage, setSelectedImage] = useState('');
+  const [added, setAdded] = useState(false);
 
   useEffect(() => {
     if (selectedSlug) {
@@ -67,7 +77,16 @@ export function ProductDetail() {
     }
   }, [selectedSlug]);
 
+  const handleAddToCart = () => {
+    if (!product) return;
+    addToCart(product);
+    setAdded(true);
+    window.setTimeout(() => setAdded(false), 1500);
+  };
+
   if (!product) return <section className="page loading-box">در حال دریافت جزئیات محصول...</section>;
+
+  const galleryImages = product.imageUrls.length > 0 ? product.imageUrls : [productImage(product)];
 
   return (
     <section className="page">
@@ -76,7 +95,7 @@ export function ProductDetail() {
         <div className="gallery-panel">
           <img src={selectedImage || productImage(product)} alt={product.name} />
           <div className="thumb-row">
-            {(product.imageUrls.length > 0 ? product.imageUrls : [productImage(product)]).map((url) => (
+            {galleryImages.map((url) => (
               <button className={selectedImage === url ? 'active-thumb' : ''} key={url} onClick={() => setSelectedImage(url)} type="button">
                 <img src={url} alt={product.name} />
               </button>
@@ -113,7 +132,8 @@ export function ProductDetail() {
           <strong>{money(product.price)}</strong>
           {product.compareAtPrice && <del>{money(product.compareAtPrice)}</del>}
           <p>ارسال از انبار ShopSuite</p>
-          <button className="danger" onClick={() => addToCart(product)}>افزودن به سبد خرید</button>
+          <button className="danger" type="button" onClick={handleAddToCart}>افزودن به سبد خرید</button>
+          <span className="add-feedback">{added ? 'به سبد خرید اضافه شد' : ''}</span>
         </aside>
       </div>
       <ProductGrid title="محصولات مشابه" products={product.similarProducts} />

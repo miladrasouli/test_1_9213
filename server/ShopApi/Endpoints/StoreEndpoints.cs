@@ -16,7 +16,40 @@ public static class StoreEndpoints
             var username = request.Username.Trim().ToLower();
             var passwordHash = ShopDbContext.HashPassword(request.Password);
             var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Username.ToLower() == username && x.PasswordHash == passwordHash);
-            return user is null ? Results.Unauthorized() : Results.Ok(ToAuthUser(user));
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            return user.IsActive ? Results.Ok(ToAuthUser(user)) : Results.BadRequest("حساب کاربری شما هنوز توسط مدیر فعال نشده است.");
+        });
+
+        api.MapPost("/auth/register", async (ShopDbContext db, RegisterRequest request) =>
+        {
+            var username = request.Username.Trim().ToLower();
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(request.Password))
+            {
+                return Results.BadRequest("نام کاربری و رمز عبور الزامی است.");
+            }
+
+            if (await db.Users.AnyAsync(x => x.Username.ToLower() == username || x.Email == request.Email))
+            {
+                return Results.BadRequest("نام کاربری یا ایمیل قبلا ثبت شده است.");
+            }
+
+            var user = new AppUser
+            {
+                Username = username,
+                PasswordHash = ShopDbContext.HashPassword(request.Password),
+                FullName = request.FullName,
+                Email = request.Email,
+                PhoneNumber = request.PhoneNumber,
+                IsAdmin = false,
+                IsActive = false
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/admin/users/{user.Id}", ToProfile(user));
         });
 
         api.MapGet("/auth/me", async (ShopDbContext db, HttpRequest http) =>
@@ -85,7 +118,49 @@ public static class StoreEndpoints
             return Results.Ok(new { total, page, pageSize, items });
         });
 
-        api.MapGet("/products/best-sellers", async (ShopDbContext db, int take = 8) =>
+        api.MapGet("/products/best-sellers", async (ShopDbContext db, int? take) =>
+        {
+            var configuredTake = take ?? await GetBestSellerTake(db);
+            return await db.Products
+                .AsNoTracking()
+                .Include(x => x.Category)
+                .Include(x => x.Images)
+                .Where(x => x.IsActive)
+                .OrderByDescending(x => x.SoldCount)
+                .Take(Math.Clamp(configuredTake, 1, 24))
+                .Select(x => ToSummary(x))
+                .ToListAsync();
+        });
+
+        api.MapGet("/site-settings", async (ShopDbContext db) =>
+            Results.Ok(await ToSiteSettings(db)));
+
+        api.MapGet("/admin/site-settings", async (ShopDbContext db, HttpRequest http) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            return Results.Ok(await ToSiteSettings(db));
+        });
+
+        api.MapPut("/admin/site-settings", async (ShopDbContext db, HttpRequest http, UpsertSiteSettingsRequest request) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            await SetSetting(db, "TopBannerImageUrl", request.TopBannerImageUrl.Trim());
+            await SetSetting(db, "TopBannerLink", request.TopBannerLink.Trim());
+            await SetSetting(db, "TopBannerAlt", request.TopBannerAlt.Trim());
+            await SetSetting(db, "BestSellerTake", Math.Clamp(request.BestSellerTake, 1, 24).ToString());
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
+        api.MapGet("/products/best-sellers/legacy", async (ShopDbContext db, int take = 8) =>
             await db.Products
                 .AsNoTracking()
                 .Include(x => x.Category)
@@ -282,6 +357,24 @@ public static class StoreEndpoints
             return Results.NoContent();
         });
 
+        api.MapDelete("/admin/products/{id:guid}", async (ShopDbContext db, HttpRequest http, Guid id) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var product = await db.Products.FindAsync(id);
+            if (product is null)
+            {
+                return Results.NotFound();
+            }
+
+            product.IsActive = false;
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
         api.MapGet("/customers/{userId:guid}/profile", async (ShopDbContext db, Guid userId) =>
         {
             var user = await db.Users.AsNoTracking().Include(x => x.Addresses).FirstOrDefaultAsync(x => x.Id == userId);
@@ -422,6 +515,103 @@ public static class StoreEndpoints
                 .ToListAsync());
         });
 
+        api.MapGet("/admin/users", async (ShopDbContext db, HttpRequest http) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            return Results.Ok(await db.Users
+                .AsNoTracking()
+                .Include(x => x.Addresses)
+                .OrderByDescending(x => x.IsAdmin)
+                .ThenBy(x => x.FullName)
+                .Select(x => ToProfile(x))
+                .ToListAsync());
+        });
+
+        api.MapGet("/admin/users/{id:guid}", async (ShopDbContext db, HttpRequest http, Guid id) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var user = await db.Users
+                .AsNoTracking()
+                .Include(x => x.Addresses)
+                .FirstOrDefaultAsync(x => x.Id == id);
+
+            if (user is null)
+            {
+                return Results.NotFound();
+            }
+
+            var orders = await db.Orders
+                .AsNoTracking()
+                .Include(x => x.User)
+                .Include(x => x.Items)
+                .Include(x => x.Invoice)
+                .Where(x => x.UserId == id)
+                .OrderByDescending(x => x.CreatedAt)
+                .ToListAsync();
+
+            var orderDtos = orders.Select(ToOrder).ToList();
+            var paidOrders = orders.Where(x => x.PaymentStatus == PaymentStatus.Paid).ToList();
+            var activities = new List<AdminUserActivityDto>
+            {
+                new(user.CreatedAt, "profile", "عضویت کاربر", $"حساب کاربری {user.Username} ایجاد شد.")
+            };
+
+            activities.AddRange(user.Addresses
+                .OrderByDescending(x => x.IsDefault)
+                .ThenBy(x => x.Title)
+                .Select(x => new AdminUserActivityDto(
+                    user.CreatedAt,
+                    "address",
+                    "آدرس ثبت‌شده",
+                    $"{x.Title}: {x.Province}، {x.City}، {x.Street}")));
+
+            activities.AddRange(orders.Select(x => new AdminUserActivityDto(
+                x.CreatedAt,
+                "order",
+                $"سفارش {x.OrderNumber}",
+                $"{x.Items.Sum(item => item.Quantity)} کالا با مبلغ {x.GrandTotal:N0} تومان")));
+
+            return Results.Ok(new AdminUserDetailDto(
+                ToProfile(user),
+                user.CreatedAt,
+                orders.Count,
+                orders.Sum(x => x.GrandTotal),
+                paidOrders.Sum(x => x.GrandTotal),
+                orders.OrderByDescending(x => x.CreatedAt).Select(x => (DateTime?)x.CreatedAt).FirstOrDefault(),
+                orderDtos,
+                activities.OrderByDescending(x => x.OccurredAt).ToList()));
+        });
+
+        api.MapPut("/admin/users/{id:guid}", async (ShopDbContext db, HttpRequest http, Guid id, UpdateAdminUserRequest request) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var user = await db.Users.FindAsync(id);
+            if (user is null)
+            {
+                return Results.NotFound();
+            }
+
+            user.FullName = request.FullName;
+            user.Email = request.Email;
+            user.PhoneNumber = request.PhoneNumber;
+            user.IsAdmin = request.IsAdmin;
+            user.IsActive = request.IsActive;
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
         api.MapGet("/admin/dashboard", async (ShopDbContext db, HttpRequest http) =>
         {
             if (!await IsAdmin(db, http))
@@ -429,7 +619,8 @@ public static class StoreEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var bestSellers = await db.Products.AsNoTracking().Include(x => x.Category).Include(x => x.Images).OrderByDescending(x => x.SoldCount).Take(5).Select(x => ToSummary(x)).ToListAsync();
+            var bestSellerTake = await GetBestSellerTake(db);
+            var bestSellers = await db.Products.AsNoTracking().Include(x => x.Category).Include(x => x.Images).OrderByDescending(x => x.SoldCount).Take(Math.Clamp(bestSellerTake, 1, 24)).Select(x => ToSummary(x)).ToListAsync();
             var recentOrders = await db.Orders.AsNoTracking().Include(x => x.User).Include(x => x.Items).Include(x => x.Invoice).OrderByDescending(x => x.CreatedAt).Take(6).Select(x => ToOrder(x)).ToListAsync();
             var totalSales = await db.Orders.Where(x => x.PaymentStatus == PaymentStatus.Paid).SumAsync(x => x.GrandTotal);
             return Results.Ok(new DashboardDto(
@@ -474,6 +665,163 @@ public static class StoreEndpoints
             db.Articles.Add(article);
             await db.SaveChangesAsync();
             return Results.Created($"/api/articles/{article.Slug}", new ArticleDto(article.Id, article.Title, article.Slug, article.Summary, article.Body, article.CoverImageUrl, article.PublishedAt));
+        });
+
+        api.MapGet("/footer", async (ShopDbContext db) =>
+        {
+            var sections = await db.FooterSections
+                .AsNoTracking()
+                .Include(x => x.Links)
+                .Where(x => x.IsActive)
+                .OrderBy(x => x.SortOrder)
+                .ToListAsync();
+            return sections.Select(x => ToFooterSection(x, true)).ToList();
+        });
+
+        api.MapGet("/menus", async (ShopDbContext db, string? location) =>
+            await db.SiteMenuItems
+                .AsNoTracking()
+                .Where(x => x.IsActive && (location == null || x.Location == location))
+                .OrderBy(x => x.Location)
+                .ThenBy(x => x.SortOrder)
+                .Select(x => new SiteMenuItemDto(x.Id, x.Location, x.Label, x.ViewKey, x.Icon, x.SortOrder, x.IsActive))
+                .ToListAsync());
+
+        api.MapGet("/admin/footer-sections", async (ShopDbContext db, HttpRequest http) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            return Results.Ok(await db.FooterSections
+                .AsNoTracking()
+                .Include(x => x.Links)
+                .OrderBy(x => x.SortOrder)
+                .Select(x => ToFooterSection(x, false))
+                .ToListAsync());
+        });
+
+        api.MapPost("/admin/footer-sections", async (ShopDbContext db, HttpRequest http, UpsertFooterSectionRequest request) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var section = new FooterSection { Title = request.Title, SortOrder = request.SortOrder, IsActive = request.IsActive };
+            db.FooterSections.Add(section);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/admin/footer-sections/{section.Id}", ToFooterSection(section, false));
+        });
+
+        api.MapPut("/admin/footer-sections/{id:guid}", async (ShopDbContext db, HttpRequest http, Guid id, UpsertFooterSectionRequest request) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var section = await db.FooterSections.FindAsync(id);
+            if (section is null) return Results.NotFound();
+            section.Title = request.Title;
+            section.SortOrder = request.SortOrder;
+            section.IsActive = request.IsActive;
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
+        api.MapDelete("/admin/footer-sections/{id:guid}", async (ShopDbContext db, HttpRequest http, Guid id) =>
+        {
+            if (!await IsAdmin(db, http))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var section = await db.FooterSections.Include(x => x.Links).FirstOrDefaultAsync(x => x.Id == id);
+            if (section is null) return Results.NotFound();
+            db.FooterLinks.RemoveRange(section.Links);
+            db.FooterSections.Remove(section);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
+        api.MapPost("/admin/footer-links", async (ShopDbContext db, HttpRequest http, UpsertFooterLinkRequest request) =>
+        {
+            if (!await IsAdmin(db, http)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            var link = new FooterLink { FooterSectionId = request.FooterSectionId, Label = request.Label, ViewKey = request.ViewKey, SortOrder = request.SortOrder, IsActive = request.IsActive };
+            db.FooterLinks.Add(link);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/admin/footer-links/{link.Id}", ToFooterLink(link));
+        });
+
+        api.MapPut("/admin/footer-links/{id:guid}", async (ShopDbContext db, HttpRequest http, Guid id, UpsertFooterLinkRequest request) =>
+        {
+            if (!await IsAdmin(db, http)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            var link = await db.FooterLinks.FindAsync(id);
+            if (link is null) return Results.NotFound();
+            link.FooterSectionId = request.FooterSectionId;
+            link.Label = request.Label;
+            link.ViewKey = request.ViewKey;
+            link.SortOrder = request.SortOrder;
+            link.IsActive = request.IsActive;
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
+        api.MapDelete("/admin/footer-links/{id:guid}", async (ShopDbContext db, HttpRequest http, Guid id) =>
+        {
+            if (!await IsAdmin(db, http)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            var link = await db.FooterLinks.FindAsync(id);
+            if (link is null) return Results.NotFound();
+            db.FooterLinks.Remove(link);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
+        api.MapGet("/admin/menus", async (ShopDbContext db, HttpRequest http) =>
+        {
+            if (!await IsAdmin(db, http)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            return Results.Ok(await db.SiteMenuItems
+                .AsNoTracking()
+                .OrderBy(x => x.Location)
+                .ThenBy(x => x.SortOrder)
+                .Select(x => new SiteMenuItemDto(x.Id, x.Location, x.Label, x.ViewKey, x.Icon, x.SortOrder, x.IsActive))
+                .ToListAsync());
+        });
+
+        api.MapPost("/admin/menus", async (ShopDbContext db, HttpRequest http, UpsertSiteMenuItemRequest request) =>
+        {
+            if (!await IsAdmin(db, http)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            var item = new SiteMenuItem { Location = request.Location, Label = request.Label, ViewKey = request.ViewKey, Icon = request.Icon, SortOrder = request.SortOrder, IsActive = request.IsActive };
+            db.SiteMenuItems.Add(item);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/admin/menus/{item.Id}", ToMenuItem(item));
+        });
+
+        api.MapPut("/admin/menus/{id:guid}", async (ShopDbContext db, HttpRequest http, Guid id, UpsertSiteMenuItemRequest request) =>
+        {
+            if (!await IsAdmin(db, http)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            var item = await db.SiteMenuItems.FindAsync(id);
+            if (item is null) return Results.NotFound();
+            item.Location = request.Location;
+            item.Label = request.Label;
+            item.ViewKey = request.ViewKey;
+            item.Icon = request.Icon;
+            item.SortOrder = request.SortOrder;
+            item.IsActive = request.IsActive;
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
+        api.MapDelete("/admin/menus/{id:guid}", async (ShopDbContext db, HttpRequest http, Guid id) =>
+        {
+            if (!await IsAdmin(db, http)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            var item = await db.SiteMenuItems.FindAsync(id);
+            if (item is null) return Results.NotFound();
+            db.SiteMenuItems.Remove(item);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
         });
 
         api.MapGet("/about", () => new
@@ -523,7 +871,7 @@ public static class StoreEndpoints
     private static string ToRole(AppUser user) => user.IsAdmin ? "Admin" : "Customer";
 
     private static AuthUserDto ToAuthUser(AppUser user) =>
-        new(user.Id, user.Username, user.FullName, user.Email, user.PhoneNumber, ToRole(user), user.IsAdmin);
+        new(user.Id, user.Username, user.FullName, user.Email, user.PhoneNumber, ToRole(user), user.IsAdmin, user.IsActive);
 
     private static List<ProductSpecification> ToSpecifications(IReadOnlyList<UpsertProductSpecificationRequest>? specifications) =>
         (specifications ?? Array.Empty<UpsertProductSpecificationRequest>())
@@ -540,7 +888,7 @@ public static class StoreEndpoints
         new(address.Id, address.Title, address.Province, address.City, address.Street, address.PostalCode, address.ReceiverName, address.ReceiverPhone, address.IsDefault);
 
     private static UserProfileDto ToProfile(AppUser user) =>
-        new(user.Id, user.Username, user.FullName, user.Email, user.PhoneNumber, ToRole(user), user.IsAdmin, user.Addresses.Select(ToAddress).ToList());
+        new(user.Id, user.Username, user.FullName, user.Email, user.PhoneNumber, ToRole(user), user.IsAdmin, user.IsActive, user.Addresses.Select(ToAddress).ToList());
 
     private static OrderDto ToOrder(Order order) =>
         new(
@@ -558,4 +906,50 @@ public static class StoreEndpoints
             order.CreatedAt,
             order.Items.Select(x => new OrderItemDto(x.ProductId, x.ProductName, x.Quantity, x.UnitPrice, x.LineTotal)).ToList(),
             order.Invoice is null ? null : new InvoiceDto(order.Invoice.Id, order.Invoice.InvoiceNumber, order.Invoice.IssuedAt, order.Invoice.PayableAmount));
+
+    private static FooterSectionDto ToFooterSection(FooterSection section, bool onlyActiveLinks) =>
+        new(
+            section.Id,
+            section.Title,
+            section.SortOrder,
+            section.IsActive,
+            section.Links
+                .Where(x => !onlyActiveLinks || x.IsActive)
+                .OrderBy(x => x.SortOrder)
+                .Select(ToFooterLink)
+                .ToList());
+
+    private static FooterLinkDto ToFooterLink(FooterLink link) =>
+        new(link.Id, link.FooterSectionId, link.Label, link.ViewKey, link.SortOrder, link.IsActive);
+
+    private static SiteMenuItemDto ToMenuItem(SiteMenuItem item) =>
+        new(item.Id, item.Location, item.Label, item.ViewKey, item.Icon, item.SortOrder, item.IsActive);
+
+    private static async Task<int> GetBestSellerTake(ShopDbContext db)
+    {
+        var value = await db.SiteSettings.AsNoTracking().Where(x => x.Key == "BestSellerTake").Select(x => x.Value).FirstOrDefaultAsync();
+        return int.TryParse(value, out var take) ? take : 8;
+    }
+
+    private static async Task<SiteSettingsDto> ToSiteSettings(ShopDbContext db)
+    {
+        var settings = await db.SiteSettings.AsNoTracking().ToDictionaryAsync(x => x.Key, x => x.Value);
+        return new SiteSettingsDto(
+            settings.GetValueOrDefault("TopBannerImageUrl", "/didikala/img/banner/large-ads.jpg"),
+            settings.GetValueOrDefault("TopBannerLink", ""),
+            settings.GetValueOrDefault("TopBannerAlt", "بنر بالای فروشگاه"),
+            int.TryParse(settings.GetValueOrDefault("BestSellerTake", "8"), out var take) ? Math.Clamp(take, 1, 24) : 8);
+    }
+
+    private static async Task SetSetting(ShopDbContext db, string key, string value)
+    {
+        var setting = await db.SiteSettings.FirstOrDefaultAsync(x => x.Key == key);
+        if (setting is null)
+        {
+            db.SiteSettings.Add(new SiteSetting { Key = key, Value = value });
+            return;
+        }
+
+        setting.Value = value;
+    }
 }

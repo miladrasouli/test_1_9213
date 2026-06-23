@@ -26,6 +26,7 @@ public class AppUser
     public string PhoneNumber { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
     public bool IsAdmin { get; set; }
+    public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public ICollection<Address> Addresses { get; set; } = new List<Address>();
     public ICollection<Order> Orders { get; set; } = new List<Order>();
@@ -155,4 +156,42 @@ public class Article
     public string CoverImageUrl { get; set; } = string.Empty;
     public bool IsPublished { get; set; } = true;
     public DateTime PublishedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class FooterSection
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Title { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public ICollection<FooterLink> Links { get; set; } = new List<FooterLink>();
+}
+
+public class FooterLink
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid FooterSectionId { get; set; }
+    public FooterSection? FooterSection { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public string ViewKey { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public class SiteMenuItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Location { get; set; } = "Header";
+    public string Label { get; set; } = string.Empty;
+    public string ViewKey { get; set; } = "home";
+    public string Icon { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public class SiteSetting
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Key { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty;
 }

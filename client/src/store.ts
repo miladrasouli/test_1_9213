@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AuthUserDto, ProductQuery, ProductSummaryDto } from './api';
 
-export type ViewKey = 'home' | 'product' | 'cart' | 'profile' | 'orders' | 'articles' | 'about' | 'contact' | 'faq' | 'admin';
+export type ViewKey = 'home' | 'product' | 'cart' | 'profile' | 'orders' | 'articles' | 'catalogs' | 'brands' | 'about' | 'contact' | 'faq' | 'admin';
 
 export type CartItem = ProductSummaryDto & {
   quantity: number;
